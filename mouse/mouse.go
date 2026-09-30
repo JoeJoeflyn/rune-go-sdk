@@ -30,6 +30,10 @@ type Mouse struct {
 	mousePressedRight  bool
 	lastClick          time.Time
 	clickCount         int
+	// anchorY is the window row of the pressed cell. It moves as a drag
+	// scrolls the view, so a drag only scrolls toward the edge the
+	// selection grows to.
+	anchorY int
 }
 
 // TODO should be defaults. add config or options
@@ -52,6 +56,7 @@ func (m *Mouse) Init(d Delegate) {
 	m.mousePressedMiddle = false
 	m.lastClick = time.Time{}
 	m.clickCount = 0
+	m.anchorY = 0
 }
 
 // Handle satisfies tui.Handler.
@@ -117,14 +122,19 @@ func (h *Mouse) handleLeftClickSelect(pos term.Coordinates) (handled bool) {
 	if h.mousePressedLeft { /* drag */
 		handled = true
 		h.delegate.SetSelectionEnd(pos)
-		if pos.Y < 4 {
-			h.delegate.ScrollUp(1)
-		} else if pos.Y > h.delegate.Height()-4 {
-			h.delegate.ScrollDown(1)
+		if pos.Y < 4 && pos.Y < h.anchorY {
+			if h.delegate.ScrollUp(1) {
+				h.anchorY++
+			}
+		} else if pos.Y > h.delegate.Height()-4 && pos.Y > h.anchorY {
+			if h.delegate.ScrollDown(1) {
+				h.anchorY--
+			}
 		}
 		return
 	}
 
+	h.anchorY = pos.Y
 	if h.clickCount == 0 || time.Since(h.lastClick) < clickChainWindow {
 		h.clickCount++
 	} else {

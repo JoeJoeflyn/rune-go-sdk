@@ -262,6 +262,127 @@ func expectMouseAction(t *testing.T, x, y int, action mouse.Action, handled, mov
 
 type expect func(*mock)
 
+// scrollRecorder counts auto-scroll calls during a drag and reports
+// whether the view moved, as a delegate at the end of its content would.
+type scrollRecorder struct {
+	height    int
+	canScroll bool
+	up, down  int
+}
+
+func (r *scrollRecorder) OnAction(term.Event, term.Coordinates, mouse.Action) bool {
+	return false
+}
+
+func (r *scrollRecorder) ScrollUp(n int) bool {
+	r.up += n
+	return r.canScroll
+}
+
+func (r *scrollRecorder) ScrollDown(n int) bool {
+	r.down += n
+	return r.canScroll
+}
+
+func (r *scrollRecorder) SetSelectionEnd(term.Coordinates)   {}
+func (r *scrollRecorder) SetSelectionStart(term.Coordinates) {}
+func (r *scrollRecorder) ClearSelection()                    {}
+func (r *scrollRecorder) SelectWordAt(term.Coordinates)      {}
+func (r *scrollRecorder) SelectLine(int)                     {}
+func (r *scrollRecorder) Width() int                         { return 10 }
+func (r *scrollRecorder) Height() int                        { return r.height }
+
+// TestMouseDragAutoScroll pins that a drag only auto-scrolls toward the
+// edge the selection grows to: the pointer must be past the anchor, which
+// moves through the window as the view scrolls.
+func TestMouseDragAutoScroll(t *testing.T) {
+	t.Parallel()
+
+	rows := func(from, to int) []int {
+		var ys []int
+		for y := from; ; {
+			ys = append(ys, y)
+			if y == to {
+				return ys
+			}
+			if from < to {
+				y++
+			} else {
+				y--
+			}
+		}
+	}
+
+	cases := []struct {
+		desc      string
+		press     int
+		drag      []int
+		canScroll bool
+		wantUp    int
+		wantDown  int
+	}{
+		{
+			desc:      "press in the top rows and drag down",
+			press:     0,
+			drag:      rows(0, 9),
+			canScroll: true,
+			wantDown:  3,
+		},
+		{
+			desc:      "press in the bottom rows and drag up",
+			press:     9,
+			drag:      rows(9, 0),
+			canScroll: true,
+			wantUp:    4,
+		},
+		{
+			desc:      "drag up into the top rows",
+			press:     5,
+			drag:      rows(4, 2),
+			canScroll: true,
+			wantUp:    2,
+		},
+		{
+			desc:      "drag down into the bottom rows",
+			press:     5,
+			drag:      rows(6, 8),
+			canScroll: true,
+			wantDown:  2,
+		},
+		{
+			// Scrolling up moved the anchor down to row 4, so the
+			// pointer back on the pressed row is still above it.
+			desc:      "anchor follows the view as it scrolls",
+			press:     3,
+			drag:      []int{2, 3},
+			canScroll: true,
+			wantUp:    2,
+		},
+		{
+			desc:   "anchor stays when the view cannot scroll",
+			press:  3,
+			drag:   []int{2, 3},
+			wantUp: 1,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.desc, func(t *testing.T) {
+			t.Parallel()
+			r := &scrollRecorder{height: 10, canScroll: tc.canScroll}
+			m := mouse.New(r)
+			m.Handle(evMouseKey(1, tc.press, term.MouseLeft))
+			for _, y := range tc.drag {
+				m.Handle(evMouseKey(2, y, term.MouseLeft))
+			}
+			m.Handle(evMouseKey(2, tc.drag[len(tc.drag)-1], term.MouseRelease))
+
+			assert.Equal(t, tc.wantUp, r.up, "scroll up")
+			assert.Equal(t, tc.wantDown, r.down, "scroll down")
+		})
+	}
+}
+
 func multiExpect(e ...expect) expect {
 	return func(m *mock) {
 		for _, expect := range e {

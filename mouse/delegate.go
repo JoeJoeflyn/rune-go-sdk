@@ -35,6 +35,9 @@ const (
 // OnAction is provided to extend to other features. It takes precedence
 // over builtin features so if it returns true, Mouse won't call
 // any other callbacks.
+//
+// ScrollUp and ScrollDown report whether the view moved. During a drag,
+// Mouse relies on it to track where the pressed cell is on screen.
 type Delegate interface {
 	OnAction(ev term.Event, pos term.Coordinates, action Action) bool
 	ScrollUp(n int) bool
